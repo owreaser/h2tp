@@ -1,6 +1,7 @@
 from socket import socket
 
-from .base import HEADER_IDS, BaseH2TPRequest
+from .base import HEADER_IDS, BaseH2TPRequest, H2TPData
+from .util import Log
 
 
 class Request(BaseH2TPRequest):
@@ -33,7 +34,7 @@ class Request(BaseH2TPRequest):
             self.port = 2
 
         if self.protocol != "h2tp":
-            print(f"Protocol {self.protocol}:// isn't h2tp:// - continuing anyways")
+            Log.warn(f"Protocol {self.protocol}:// isn't h2tp:// - continuing anyways")
 
         # add default headers
         if overwrite_necessary_headers or HEADER_IDS.HOST not in self.headers:
@@ -45,14 +46,14 @@ class Request(BaseH2TPRequest):
         if HEADER_IDS.CLIENT_ID not in self.headers:
             self.headers[HEADER_IDS.CLIENT_ID] = (self.DEFAULT_CLIENT_ID, HEADER_IDS.CLIENT_ID in HEADER_IDS.META.IMPORTANT_HEADERS)
 
-    def send(self) -> dict | None:
+    def send(self) -> H2TPData | None:
         with socket() as sock:
             sock.connect((self.hostname, self.port))
             sock.sendall(self.build_request())
 
             response = self.get_from_stream(sock)
             parsed = self.parse(response)
-            print("[H2TP Server]", parsed)
+            Log.debug("[H2TP Server]", parsed)
 
             return parsed
 
@@ -60,7 +61,7 @@ def fetch(
     url: str,
     body: str | bytes | None=None,
     headers: dict[int, str | bytes | tuple[str | bytes, bool]] | None=None
-) -> dict | None:
+) -> H2TPData | None:
     # Easy wrapper for `Request`s
 
     obj = Request(url, body, headers)

@@ -1,6 +1,6 @@
 import socket
 
-from .util import b, clamp
+from .util import Log, b, clamp
 
 
 class HEADER_IDS:
@@ -15,6 +15,58 @@ class HEADER_IDS:
             0x00, # HOST
             0x01, # PATH
         ]
+
+class H2TPDataHeader:
+    HEADER_NAMES = {
+        HEADER_IDS.HOST: "Host",
+        HEADER_IDS.PATH: "Path",
+        HEADER_IDS.CLIENT_ID: "Client ID",
+        HEADER_IDS.MIME_TYPE: "Mime Type",
+        HEADER_IDS.STATUS: "Status"
+    }
+
+    def __init__(
+        self,
+        content: bytes,
+        important: bool,
+        hid: int
+    ):
+        self.content: bytes = content
+        self.important: bool = important
+        self.hid: int = hid
+
+    def __str__(self) -> str:
+        return f"0x{hex(self.hid)[2:].zfill(2)}/{self.hid_to_str()}{' (!)' if self.important else ''}"
+
+    def hid_to_str(self) -> str:
+        if self.hid in self.HEADER_NAMES:
+            return self.HEADER_NAMES[self.hid]
+
+        if self.hid < 0x80:
+            return "Reserved"
+
+        return "User-Defined"
+
+class H2TPData:
+    def __init__(
+        self,
+        version: tuple[int, int],
+        was_corrupted: bool,
+        headers: dict[int, tuple[bytes, bool]],
+        body: bytes,
+        checksum_valid: bool
+    ):
+        self.version: tuple[int, int] = version
+        self.was_corrupted: bool = was_corrupted
+        self.headers: dict[int, H2TPDataHeader] = {}
+        self.body: bytes = body
+        self.checksum_valid: bool = checksum_valid
+
+        for hid, data in headers.items():
+            self.headers[hid] = H2TPDataHeader(*data, hid)
+
+    def __str__(self) -> str:
+        return f"'{bytes.decode(self.body, errors='ignore')}' ({len(self.headers)} header{'s' if len(self.headers) != 1 else ''}: {', '.join([str(i) for i in self.headers.values()])})"
 
 class BaseH2TPRequest:
     H2TP_HEADER = b"\xb0\x00\xb1\xe5H2TP"
@@ -80,9 +132,9 @@ class BaseH2TPRequest:
         raise NotImplementedError("Compression hasn't been implemented")
 
     @staticmethod
-    def parse(data: bytes, *, continue_parsing_corrupted: bool=False) -> dict | None:
+    def parse(data: bytes, *, continue_parsing_corrupted: bool=False) -> H2TPData | None:
         if not data.startswith(BaseH2TPRequest.H2TP_HEADER):
-            print("invalid header")
+            Log.warn("[H2TP] Invalid H2TP header")
             return None
 
         version = (
@@ -95,7 +147,7 @@ class BaseH2TPRequest:
         checksum_valid = BaseH2TPRequest.validate_checksum(data, checksum)
 
         if not checksum_valid:
-            print("invalid checksum")
+            Log.warn("[H2TP] Invalid checksum")
             if not continue_parsing_corrupted:
                 return None
 
@@ -103,7 +155,7 @@ class BaseH2TPRequest:
         if was_corrupted:
             data = data[4:]
 
-        headers = {}
+        headers: dict[int, tuple[bytes, bool]] = {}
         if data.startswith(b"HEAD"):
             header_count = data[4]
             data = data[5:]
@@ -113,10 +165,7 @@ class BaseH2TPRequest:
                 header_id = data[0]
                 header_data = data[3:header_length + 3]
 
-                headers[header_id] = {
-                    "content": header_data,
-                    "important": bool(data[1] & 0x80)
-                }
+                headers[header_id] = (header_data, bool(data[1] & 0x80))
                 data = data[3 + header_length:]
 
         # "BODY" header
@@ -129,13 +178,13 @@ class BaseH2TPRequest:
         if compressed:
             raise NotImplementedError("Compression hasn't been implemented")
 
-        return {
-            "version": version,
-            "corrupted": was_corrupted,
-            "headers": headers,
-            "body": body,
-            "checksum_valid": checksum_valid
-        }
+        return H2TPData(
+            version,
+            was_corrupted,
+            headers,
+            body,
+            checksum_valid
+        )
 
     @staticmethod
     def get_from_stream(socket: socket.socket) -> bytes:
