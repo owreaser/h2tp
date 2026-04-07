@@ -121,7 +121,7 @@ class BaseH2TPRequest:
 
             for i in range(8):
                 if checksum & 0x80000000:
-                    checksum = checksum & 0x7fffffff << 1 ^ BaseH2TPRequest.CHECKSUM_XOR_VALUE
+                    checksum = (checksum & 0x7fffffff) << 1 ^ BaseH2TPRequest.CHECKSUM_XOR_VALUE
                 else:
                     checksum = checksum << 1
 
